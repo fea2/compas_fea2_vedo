@@ -1,75 +1,70 @@
-from vedo import Plotter, Points, Mesh, TetMesh, Cone, Glyph, Arrows
+from vedo import Plotter, Points, Mesh, TetMesh, Cone, Glyph, Arrows, Grid, Text2D, precision, Sphere, Axes
 from compas_fea2.model import Model, DeformablePart
 from compas_fea2.problem import Step
-from compas_fea2.results.fields import FieldResults
+
+# from compas_fea2.results.fields import FieldResults  # Assuming this is your field results type
 from itertools import chain
 import numpy as np
-from typing import List, Any, Optional
+from typing import List, Tuple, Optional, Any
+
+# Type alias for field results
+# FieldResultsType = TypeAlias("compas_fea2.results.fields._FieldResults")
 
 
 class FEA2Viewer:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.plotter = Plotter(shape=(2, 2), title="Model Viewer with Toggle Menu", axes=8, bg="white", size=(1200, 800))
+    def __init__(self, shape: Tuple = (1, 1), *args: Any, **kwargs: Any) -> None:
+        self.plotter = Plotter(shape=shape, title="Model Viewer", axes=14, bg="black", size=(1200, 800))
 
-        # Visualization parameters
         self.point_color = "red"
         self.point_size = 5
         self.mesh_color = "lightblue"
         self.mesh_alpha = 0.8
         self.cmap = "jet"
+        self.grid = None  # Store the grid actor
+        self.camera_position = None
+
+        if kwargs.get("show_grid", False):
+            self.add_grid()
+
+    def add_grid(self, size: Tuple[float, float] = (5000, 5000), resolution: Tuple[int, int] = (10, 10), color: str = "gray", alpha: float = 0.3):
+        if self.grid is None:
+            self.grid = Grid(s=size, res=resolution, lw=0.5)
+            self.grid.c(color)
+            self.grid.alpha(alpha)
+            self.grid.z(0)
+            self.plotter.add(self.grid)
+        else:
+            self.plotter.add(self.grid)
+
+    def remove_grid(self):
+        if self.grid is not None:
+            self.plotter.remove(self.grid)
 
     def add_objects(self, *args: Any, **kwargs: Any) -> None:
-        """Add actors to the plotter."""
         self.plotter.add(args + tuple(kwargs.values()))
 
-    def add_cmap_to_mesh(self, mesh: Mesh, values: Optional[List[float]] = None, title: str = "title", cmap: str = "jet", on: str = "points") -> Mesh:
-        """Add color map to the mesh.
-
-        Parameters
-        ----------
-        mesh : Mesh
-            The mesh to which the color map will be added.
-        values : Optional[List[float]]
-            The values for the color map.
-        title : str
-            The title of the scalar bar.
-        cmap : str
-            The color map to use.
-        on : str
-            Apply the color map on points or cells.
-
-        Returns
-        -------
-        Mesh
-            The mesh with the color map applied.
-        """
-        if values:
+    def add_cmap_to_mesh(
+        self,
+        mesh: Mesh,
+        values: Optional[List[float]] = None,
+        title: str = "title",
+        cmap: str = "jet",
+        on: str = "points",
+    ) -> Mesh:
+        if values is not None:
             mesh.cmap(cmap, values, on=on)
             mesh.add_scalarbar(title=title)
         return mesh
 
     def add_isolines_to_mesh(self, mesh: Mesh, n: int = 10) -> Mesh:
-        """Add isolines to the mesh.
-
-        Parameters
-        ----------
-        mesh : Mesh
-            The mesh to which the isolines will be added.
-        n : int
-            The number of isolines.
-
-        Returns
-        -------
-        Mesh
-            The mesh with isolines added.
-        """
         surface = mesh.tomesh()
         isolines = surface.isolines(n=n)
         isolines.c("black").lw(4)
         return isolines
 
-    def show(self) -> None:
-        """Show the visualization with toggle buttons."""
+    def show(self, camera_position: Optional[Tuple] = None) -> None:
+        if camera_position:
+            self.plotter.camera.SetPosition(*camera_position)  # Set camera position
         self.plotter.show(viewup="z", interactive=True).close()
 
 
@@ -83,11 +78,6 @@ class ModelViewer(FEA2Viewer):
     def parts(self) -> List["PartViewer"]:
         """Get parts from the model."""
         return self._parts
-
-    @property
-    def elements(self) -> List[Any]:
-        """Get elements from the model."""
-        return list(chain.from_iterable([part.elements for part in self.parts]))
 
     def add_part(self, part: DeformablePart) -> None:
         """Add parts to the plotter.
@@ -113,7 +103,7 @@ class ModelViewer(FEA2Viewer):
             glyph.lighting("ambient")
             self.plotter.add(glyph)
 
-    def add_node_field_results(self, field: FieldResults, draw_vectors: bool, draw_cmap: bool, draw_isolines: int) -> None:
+    def add_node_field_results(self, field, draw_vectors: float = False, draw_cmap: str = False, draw_isolines: int = False) -> None:
         """Add field results to the plotter.
 
         Parameters
@@ -130,7 +120,7 @@ class ModelViewer(FEA2Viewer):
         for part in self.parts:
             part.add_node_field_results(field, draw_vectors, draw_cmap, draw_isolines)
 
-    def add_stess_field_results(self, field: FieldResults, draw_vectors: bool, draw_cmap: bool, draw_isolines: int) -> None:
+    def add_stess_field_results(self, field, draw_vectors: bool, draw_cmap: bool, draw_isolines: int) -> None:
         """Add stress field results to the plotter.
 
         Parameters
@@ -164,7 +154,13 @@ class ModelViewer(FEA2Viewer):
         for part in self.parts:
             part.add_mode_shapes(shapes, sf)
 
-    def show(self, show_bcs: bool = True, show_parts: bool = True) -> None:
+    def show(
+        self,
+        show_bcs: bool = True,
+        show_parts: bool = True,
+        camera_position: Optional[Tuple] = None,
+        section: Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float]]] = None,
+    ) -> None:
         """Show the visualization with toggle buttons.
 
         Parameters
@@ -173,6 +169,8 @@ class ModelViewer(FEA2Viewer):
             Whether to show boundary conditions.
         show_parts : bool
             Whether to show parts.
+        section : Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float], float]]
+            Parameters for creating a section through the model.
         """
         if show_bcs:
             self.add_bcs()
@@ -184,7 +182,7 @@ class ModelViewer(FEA2Viewer):
                 self.plotter.add(part.field_vectors)
                 for i, shape in enumerate(part.shapes, start=1):
                     self.plotter.at(i).add(shape)
-        self.plotter.show(viewup="z", interactive=True)
+        super().show(camera_position=camera_position)
 
 
 class PartViewer(FEA2Viewer):
@@ -203,7 +201,7 @@ class PartViewer(FEA2Viewer):
         self._points = Points(self.vertices, r=self.point_size, c=self.point_color).legend("Nodes")
         self._elements_faces = [face.nodes_key for element in self.part.elements for face in element.faces]
         self._elements_connectivity = [element.nodes_key for element in self.part.elements]
-        self._elements = TetMesh([self.vertices, self.elements_connectivity])
+        self._elements = TetMesh([self.vertices, self.elements_connectivity]).alpha(self.mesh_alpha).c(self.mesh_color)
         self._isolines = None
         self._field_vectors = None
         self._deformed = None
