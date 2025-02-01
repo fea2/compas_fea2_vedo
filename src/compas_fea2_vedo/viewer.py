@@ -3,7 +3,6 @@ from compas_fea2.model import Model, DeformablePart
 from compas_fea2.problem import Step
 
 # from compas_fea2.results.fields import FieldResults  # Assuming this is your field results type
-from itertools import chain
 import numpy as np
 from typing import List, Tuple, Optional, Any
 
@@ -197,7 +196,7 @@ class PartViewer(FEA2Viewer):
         """
         super().__init__(*args, **kwargs)
         self.part = part
-        self._vertices = [node.xyz for node in sorted(self.part.nodes, key=lambda n: n.key)]
+        self._vertices = [node.xyz for node in sorted(self.part.nodes, key=lambda n: n._part_key)]
         self._points = Points(self.vertices, r=self.point_size, c=self.point_color).legend("Nodes")
         self._elements_faces = [face.nodes_key for element in self.part.elements for face in element.faces]
         self._elements_connectivity = [element.nodes_key for element in self.part.elements]
@@ -269,7 +268,7 @@ class PartViewer(FEA2Viewer):
         locations = []
         vectors = []
         scalars = []
-        for loc in sorted(self.part.nodes, key=lambda n: n.key):
+        for loc in sorted(self.part.nodes, key=lambda n: n.part_key):
             vec = field.get_result_at(loc).vector.scaled(draw_vectors)
             loc = loc.xyz
             locations.append(loc)
@@ -304,7 +303,7 @@ class PartViewer(FEA2Viewer):
             The scale factor for the deformed shape.
         """
         new_pts = []
-        for node in sorted(self.part.nodes, key=lambda n: n.key):
+        for node in sorted(self.part.nodes, key=lambda n: n.part_key):
             vec = node.displacement(step).vector.scaled(sf)
             new_pts.append(node.xyz + vec)
         self._deformed = TetMesh([new_pts, self.elements_connectivity])
