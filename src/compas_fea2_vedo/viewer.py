@@ -1,4 +1,4 @@
-from vedo import Plotter, Points, Mesh, TetMesh, Cone, Glyph, Arrows, Grid, Text2D, precision, Sphere, Axes
+from vedo import Plotter, Points, Mesh, TetMesh, Cone, Glyph, Arrows, Grid, Text2D, precision, Sphere, Axes, Polygon
 from compas_fea2.model import Model, DeformablePart
 from compas_fea2.problem import Step
 
@@ -12,12 +12,12 @@ from typing import List, Tuple, Optional, Any
 
 class FEA2Viewer:
     def __init__(self, shape: Tuple = (1, 1), *args: Any, **kwargs: Any) -> None:
-        self.plotter = Plotter(shape=shape, title="Model Viewer", axes=14, bg="black", size=(1200, 800))
+        self.plotter = Plotter(shape=shape, title="Model Viewer", axes=14, bg="white", size=(1200, 800))
 
         self.point_color = "red"
         self.point_size = 5
         self.mesh_color = "lightblue"
-        self.mesh_alpha = 0.8
+        self.mesh_alpha = 1
         self.cmap = "jet"
         self.grid = None  # Store the grid actor
         self.camera_position = None
@@ -52,7 +52,7 @@ class FEA2Viewer:
     ) -> Mesh:
         if values is not None:
             mesh.cmap(cmap, values, on=on)
-            mesh.add_scalarbar(title=title)
+            mesh.add_scalarbar(title=title, font_size=24)
         return mesh
 
     def add_isolines_to_mesh(self, mesh: Mesh, n: int = 10) -> Mesh:
@@ -60,6 +60,13 @@ class FEA2Viewer:
         isolines = surface.isolines(n=n)
         isolines.c("black").lw(4)
         return isolines
+
+    def add_isosurfaces_to_mesh(self, mesh: Mesh, n: int, scalars: list) -> Mesh:
+        iso_values = np.linspace(min(scalars), max(scalars), n)
+        isosurfaces = []
+        for value in iso_values:
+            isosurfaces.append(mesh.isosurface(value=value))
+        return isosurfaces
 
     def show(self, camera_position: Optional[Tuple] = None) -> None:
         if camera_position:
@@ -102,7 +109,7 @@ class ModelViewer(FEA2Viewer):
             glyph.lighting("ambient")
             self.plotter.add(glyph)
 
-    def add_node_field_results(self, field, draw_vectors: float = False, draw_cmap: str = False, draw_isolines: int = False) -> None:
+    def add_node_field_results(self, field, draw_vectors: float = None, draw_cmap: str = None, draw_isolines: int = None, draw_isosurfaces: int = None) -> None:
         """Add field results to the plotter.
 
         Parameters
@@ -115,9 +122,11 @@ class ModelViewer(FEA2Viewer):
             Whether to draw color map.
         draw_isolines : int
             The number of isolines to draw.
+        draw_isosurfaces : int
+            The number of isosurfaces to draw.
         """
         for part in self.parts:
-            part.add_node_field_results(field, draw_vectors, draw_cmap, draw_isolines)
+            part.add_node_field_results(field, draw_vectors, draw_cmap, draw_isolines, draw_isosurfaces)
 
     def add_stess_field_results(self, field, draw_vectors: bool, draw_cmap: bool, draw_isolines: int) -> None:
         """Add stress field results to the plotter.
@@ -153,6 +162,33 @@ class ModelViewer(FEA2Viewer):
         for part in self.parts:
             part.add_mode_shapes(shapes, sf)
 
+    def add_interfaces(self, interfaces, color="yellow", alpha=0.5):
+        """Visualize 3D interfaces as polygons in the model.
+
+        Parameters
+        ----------
+        interfaces : List[Interface]
+            A list of detected interface objects.
+        color : str, optional
+            The color for the interface polygons, by default "yellow".
+        alpha : float, optional
+            Transparency of the polygons, by default 0.5.
+        """
+        for interface in interfaces:
+            interface = interface[0]
+            # Ensure the interface has enough points
+            if len(interface.points) < 3:
+                continue  # Skip invalid polygons
+
+            # Create a 3D polygon as a vedo Mesh
+            poly = Mesh([interface.points, [[i for i in range(len(interface.points))]]])  # Define face connectivity
+            poly.c(color).alpha(alpha)  # Set color and transparency
+
+            # Add the polygon to the plotter
+            self.plotter.add(poly)
+
+        print(f"Added {len(interfaces)} 3D interface polygons to the visualization.")
+
     def show(
         self,
         show_bcs: bool = True,
@@ -173,6 +209,10 @@ class ModelViewer(FEA2Viewer):
         """
         if show_bcs:
             self.add_bcs()
+
+        for part in self.parts:
+            self.plotter.add(part._isosurfaces)
+            # self.plotter.add(self.cut_mesh(part.elements, None))
         if show_parts:
             for part in self.parts:
                 self.plotter.add(part.elements)
@@ -196,12 +236,12 @@ class PartViewer(FEA2Viewer):
         """
         super().__init__(*args, **kwargs)
         self.part = part
-        self._vertices = [node.xyz for node in sorted(self.part.nodes, key=lambda n: n._part_key)]
+        self._vertices = part.points_sorted
         self._points = Points(self.vertices, r=self.point_size, c=self.point_color).legend("Nodes")
-        self._elements_faces = [face.nodes_key for element in self.part.elements for face in element.faces]
-        self._elements_connectivity = [element.nodes_key for element in self.part.elements]
+        self._elements_connectivity = part.elements_connectivity
         self._elements = TetMesh([self.vertices, self.elements_connectivity]).alpha(self.mesh_alpha).c(self.mesh_color)
         self._isolines = None
+        self._isosurfaces = None
         self._field_vectors = None
         self._deformed = None
         self._shapes = []
@@ -215,11 +255,6 @@ class PartViewer(FEA2Viewer):
     def points(self) -> Points:
         """Create points for nodes and store them in actors."""
         return self._points
-
-    @property
-    def elements_faces(self) -> List[List[int]]:
-        """Get faces from elements."""
-        return self._elements_faces
 
     @property
     def elements_connectivity(self) -> List[List[int]]:
@@ -251,7 +286,34 @@ class PartViewer(FEA2Viewer):
         """Get mode shapes from mesh."""
         return self._shapes
 
-    def add_node_field_results(self, field: Any, draw_vectors: float, draw_cmap: str, draw_isolines: int) -> None:
+    # def add_elements(self) -> None:
+    #     """Add elements to the plotter.
+
+    #     Parameters
+    #     ----------
+    #     """
+    #     from compas_fea2.model.elements import TetrahedronElement, _Element1D, _Element2D
+    #     from vedo import TetMesh, Mesh, Lines  # Replace with your actual visualization classes if different
+
+    #     all_nodes = self.part.nodes_sorted
+    #     for cls, elements_group in self.part.elements_connectivity_grouped.items():
+    #         connectivity = list(all_nodes.index(n) for e in elements_group for n in e.nodes)
+    #         if issubclass(cls, TetrahedronElement):
+    #             tet_mesh = TetMesh(self.vertices, connectivity)
+    #             self._elements.append(tet_mesh.alpha(self.mesh_alpha).c(self.mesh_color))
+
+    #         elif issubclass(cls, _Element2D):
+    #             mesh = Mesh([self.vertices, connectivity])
+    #             self._elements.append(mesh.alpha(self.mesh_alpha).c(self.mesh_color))
+
+    #         elif issubclass(cls, _Element1D):
+    #             line_el = Lines([self.vertices, connectivity])
+    #             self._elements.append(line_el.lw(self.line_width).c(self.line_color))
+
+    #         else:
+    #             print(f"Element type '{cls}' not supported for visualization.")
+
+    def add_node_field_results(self, field: Any, draw_vectors: float = None, draw_cmap: str = None, draw_isolines: int = None, draw_isosurfaces: int = None) -> None:
         """Add field results to the plotter.
 
         Parameters
@@ -264,6 +326,8 @@ class PartViewer(FEA2Viewer):
             The color map to draw. If None, color map is not drawn.
         draw_isolines : int
             The number of isolines to draw. If None, isolines are not drawn.
+        draw_isosurfaces : int
+            The number of isosurfaces to draw. If None, isosurfaces are not drawn
         """
         locations = []
         vectors = []
@@ -286,11 +350,16 @@ class PartViewer(FEA2Viewer):
             )
             self._field_vectors = arrows
 
+        if (draw_isolines or draw_isosurfaces) and not draw_cmap:
+            draw_cmap = "viridis"
+
         if draw_cmap:
             mesh = self.add_cmap_to_mesh(self.elements, values=scalars, title=field.field_name, cmap=draw_cmap)
 
             if draw_isolines:
                 self._isolines = self.add_isolines_to_mesh(mesh, n=draw_isolines)
+            if draw_isosurfaces:
+                self._isosurfaces = self.add_isosurfaces_to_mesh(mesh, n=draw_isosurfaces, scalars=scalars)
 
     def add_deformed_shape(self, step: Step, sf: float) -> None:
         """Add deformed shape to the plotter.
