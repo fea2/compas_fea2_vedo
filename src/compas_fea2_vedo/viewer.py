@@ -1,5 +1,5 @@
 from vedo import Plotter, Points, Mesh, TetMesh, Cone, Glyph, Arrows, Grid, Text2D, precision, Sphere, Axes, Polygon
-from compas_fea2.model import Model, DeformablePart
+from compas_fea2.model import Model, Part
 from compas_fea2.problem import Step
 
 # from compas_fea2.results.fields import FieldResults  # Assuming this is your field results type
@@ -85,12 +85,12 @@ class ModelViewer(FEA2Viewer):
         """Get parts from the model."""
         return self._parts
 
-    def add_part(self, part: DeformablePart) -> None:
+    def add_part(self, part: Part) -> None:
         """Add parts to the plotter.
 
         Parameters
         ----------
-        part : DeformablePart
+        part : Part
             The part to add to the plotter.
         """
         part_viewer = PartViewer(part)
@@ -225,14 +225,14 @@ class ModelViewer(FEA2Viewer):
 
 
 class PartViewer(FEA2Viewer):
-    def __init__(self, part: DeformablePart, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, part: Part, *args: Any, **kwargs: Any) -> None:
         """
-        Visualize a `DeformablePart` of the FEA model with toggle buttons.
+        Visualize a `Part` of the FEA model with toggle buttons.
 
         Parameters
         ----------
-        part : DeformablePart
-            The `DeformablePart` object to visualize.
+        part : Part
+            The `Part` object to visualize.
         """
         super().__init__(*args, **kwargs)
         self.part = part
